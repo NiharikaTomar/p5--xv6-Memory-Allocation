@@ -527,3 +527,18 @@ procdump(void)
     cprintf("\n");
   }
 }
+
+int
+dump_physmem(int *frames, int *pids, int numframes)
+{
+  struct proc* p;
+  if(frames == 0 || pids == 0){
+    return -1;
+  }
+  for (int i = 0; i < numframes - 1; i++) {
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      pids[i] = p[i].pid;
+    }
+  }
+  return 0;
+}
