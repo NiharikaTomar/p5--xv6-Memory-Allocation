@@ -161,6 +161,14 @@ growproc(int n)
 
   sz = curproc->sz;
   if(n > 0){
+
+/////////////////////////////// FIXME
+    // if(sz+n > KERNBASE - curproc->ss -PGSIZE){
+    //   return -1;
+    // }
+
+    //////////////////////////////// FIXME
+
     if((sz = allocuvm(curproc->pgdir, sz, sz + n)) == 0)
       return -1;
   } else if(n < 0){
