@@ -161,14 +161,6 @@ growproc(int n)
 
   sz = curproc->sz;
   if(n > 0){
-
-/////////////////////////////// FIXME
-    // if(sz+n > KERNBASE - curproc->ss -PGSIZE){
-    //   return -1;
-    // }
-
-    //////////////////////////////// FIXME
-
     if((sz = allocuvm(curproc->pgdir, sz, sz + n)) == 0)
       return -1;
   } else if(n < 0){
@@ -544,9 +536,7 @@ dump_physmem(int *frames, int *pids, int numframes)
     return -1;
   }
   for (int i = 0; i < numframes - 1; i++) {
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      pids[i] = p[i].pid;
-    }
+    cprintf("frame: %x; pid: %d\n", frames[i], pids[i]);
   }
   return 0;
 }

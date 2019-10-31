@@ -9,6 +9,9 @@
 #include "mmu.h"
 #include "spinlock.h"
 
+int *frames[16385];
+int *pids[16385];
+
 void freerange(void *vstart, void *vend);
 extern char end[]; // first address after kernel loaded from ELF file
                    // defined by the kernel linker script in kernel.ld
@@ -48,7 +51,7 @@ freerange(void *vstart, void *vend)
 {
   char *p;
   p = (char*)PGROUNDUP((uint)vstart);
-  for(; p + PGSIZE <= (char*)vend; p += PGSIZE)
+  for(; p + PGSIZE <= (char*)vend; p += PGSIZE * 2)
     kfree(p);
 }
 // Free the page of physical memory pointed at by v,
@@ -75,21 +78,38 @@ kfree(char *v)
     release(&kmem.lock);
 }
 
-// Allocate one 4096-byte page of physical memory.
-// Returns a pointer that the kernel can use.
-// Returns 0 if the memory cannot be allocated.
+// Same as kalloc but accepts pid
 char*
-kalloc(void)
+kalloc2(uint pid)
 {
   struct run *r;
+  struct proc *p = myproc();
 
   if(kmem.use_lock)
     acquire(&kmem.lock);
   r = kmem.freelist;
   if(r)
     kmem.freelist = r->next;
+
+  // V2P and shift, and mask off
+  uint framenumber = V2P(r) >> 12;
+
+  // Put pid and frame number in corresponding 
+  for (int i = 0; i < 16385; ++i) {
+    frames[i] = framenumber;
+    pids[i] = p[i].pid;
+  }
+
   if(kmem.use_lock)
     release(&kmem.lock);
   return (char*)r;
 }
 
+// Allocate one 4096-byte page of physical memory.
+// Returns a pointer that the kernel can use.
+// Returns 0 if the memory cannot be allocated.
+char*
+kalloc(void)
+{
+  return kalloc2(-2);
+}
