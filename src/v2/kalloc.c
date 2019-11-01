@@ -19,6 +19,7 @@ int index = 0;
 uint framenumber;
 uint pidNum;
 
+// We can include pfn inside and access it like curr->pfn or he doesn't know another way to do so.
 struct run {
   struct run *next;
 };
@@ -76,10 +77,11 @@ kfree(char *v)
     acquire(&kmem.lock);
   r = (struct run*)v;
 
-
+  struct run *curr = kmem.freelist; // head of the freelist
   // Loop through freelist and keep it sorted
-  for (int i = 0; i < FREELIST; i++) {
-    // sort
+  while(curr != 0) {
+
+    curr->next;
   }
 
   r->next = kmem.freelist;
