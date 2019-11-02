@@ -21,6 +21,7 @@ uint pidNum;
 
 struct run {
   struct run *next;
+  uint pfn;
 };
 
 struct {
@@ -75,14 +76,15 @@ kfree(char *v)
   if(kmem.use_lock)
     acquire(&kmem.lock);
   r = (struct run*)v;
+
   r->next = kmem.freelist;
   kmem.freelist = r;
   if(kmem.use_lock)
     release(&kmem.lock);
 }
 
-void updatePid(uint pid){
-	pidNum = pid;
+uint updatePid(uint pid){
+	return pidNum = pid;
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -96,18 +98,21 @@ kalloc(void)
   if(kmem.use_lock)
     acquire(&kmem.lock);
   r = kmem.freelist;
-  if(r)
+  
+  if(r){
     kmem.freelist = r->next;
+  }
+
+  // V2P and shift, and mask off
+  framenumber = (uint)(V2P(r) >> 12 & 0xffff);
+
+  updatePid(1);
+
+  frames[index] = framenumber;
+  pids[index] = pidNum;
+  index++;
 
   if(kmem.use_lock) {
-  	// V2P and shift, and mask off
-    framenumber = (uint)(V2P(r) >> 12 & 0xffff);
-
-    updatePid(1);
-
-    frames[index] = framenumber;
-    pids[index] = pidNum;
-    index++;
     release(&kmem.lock);
   }
   return (char*)r;
@@ -122,26 +127,107 @@ char*
 kalloc2(uint pid)
 {
   struct run *r;
+  struct run *prev; // head of the freelist
+  uint nextPid = -2;
+  uint prevPid = -2;
 
   if(kmem.use_lock)
     acquire(&kmem.lock);
-  r = kmem.freelist;
-  if(r)
-    kmem.freelist = r->next;
-  
-  // Update global pid
-  updatePid(pid);
+  r = kmem.freelist; // head which acts as a current pointer
 
-  if(kmem.use_lock) {
-  	  // V2P and shift, and mask off
+  // // V2P and shift, and mask off
+  // framenumber = (uint)(V2P(r) >> 12 & 0xffff);
+  // r->pfn = framenumber;
+
+  // Update global pid
+  uint currPid = updatePid(pid);
+
+
+  // frames[index] = framenumber;
+  // pids[index] = pidNum;
+  // index++;
+
+ // if(r){
+ //    kmem.freelist = r->next;
+ //  }
+
+  prev = r;
+   // cprintf("before while: %p", r);
+  while(r){
+    // looking at 1 frame before current to check for same process
+    int i;
+    int j;
+
+    // V2P and shift, and mask off
     framenumber = (uint)(V2P(r) >> 12 & 0xffff);
+    r->pfn = framenumber;
 
     frames[index] = framenumber;
     pids[index] = pidNum;
     index++;
+
+    for(i = 0; i < 16384; i++){
+
+      if (frames[i] == r->pfn - 1) {
+        prevPid = pids[i];
+        // cprintf("check prev: %d\n", prevPid);
+        break;
+      }
+    }
+    // looking at 1 frame after current to check for same process
+    for(j = 0; j < 16384; j++){
+
+      if(frames[j] == r->pfn + 1){
+        nextPid = pids[j];
+        // cprintf("check next: %d\n", nextPid);
+        break;
+      }
+    }
+    // for(int i = 0; i < 16384; i++){
+
+    //   if (frames[i] == r->pfn - 1) {
+    //     prevPid = pids[i];
+    //     cprintf("check prev: %d\n", prevPid);
+    //     break;
+    //   }
+    // }
+    // // looking at 1 frame after current to check for same process
+    // for(int i = 0; i < 16384; i++){
+
+    //   if(frames[i] == r->pfn + 1){
+    //     nextPid = pids[i];
+    //     cprintf("check next: %d\n", nextPid);
+    //     break;
+    //   }
+    // }
+    // if((prevPid == -1 && prevPid ==  currPid) || (nextPid == -1 && nextPid == currPid)){
+    // cprintf("outside if: (%d, %d), (%d, %d) %d\n", pids[i], i,  pids[j], j, currPid);
+    if(((prevPid != -2 && prevPid ==  currPid) && (nextPid != -2 && nextPid == currPid)) ||
+      (prevPid == -2 && nextPid == -2) || (prevPid != -2 && currPid == prevPid && nextPid == -2) ||
+      (prevPid == -2 && nextPid != -2 && currPid == nextPid)){
+    // cprintf("inside if: (%d, %d), (%d, %d) %d\n", pids[i], i,  pids[j], j, currPid);
+      // cprintf("after if: %d", prevPid);
+      // Should not allocate free page
+      if(r == kmem.freelist){
+        kmem.freelist = r->next;
+      } else {
+        prev->next = r->next;
+      }
+      break;
+    }
+    prev = r;
+    r = r->next;  
+      // cprintf("after while: %d\n", currPid);
+      // cprintf("after while: %d", nextPid);
+      // cprintf("after while: %d", prevPid);
+  }
+  //cprintf("after while: %p", prev);
+
+
+  if(kmem.use_lock) {
     release(&kmem.lock);
   }
-    
+
   return (char*)r;
 }
 
