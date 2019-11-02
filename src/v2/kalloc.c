@@ -19,9 +19,9 @@ int index = 0;
 uint framenumber;
 uint pidNum;
 
-// We can include pfn inside and access it like curr->pfn or he doesn't know another way to do so.
 struct run {
   struct run *next;
+  uint pfn;
 };
 
 struct {
@@ -77,13 +77,6 @@ kfree(char *v)
     acquire(&kmem.lock);
   r = (struct run*)v;
 
-  struct run *curr = kmem.freelist; // head of the freelist
-  // Loop through freelist and keep it sorted
-  while(curr != 0) {
-
-    curr->next;
-  }
-
   r->next = kmem.freelist;
   kmem.freelist = r;
   if(kmem.use_lock)
@@ -101,22 +94,54 @@ char*
 kalloc(void)
 {
   struct run *r;
+  uint prevPid;
+  uint currPid;
+  struct run *prev; // head of the freelist
 
   if(kmem.use_lock)
     acquire(&kmem.lock);
   r = kmem.freelist;
-  if(r)
-    kmem.freelist = r->next;
+
+  if(r){
+    //FIXME
+    for(int i = 0; i < 16384; i++){
+      if (frames[i] == r->pfn) {
+        currPid = pids[i];
+        break;
+      }
+    }
+    for(int i = 0; i < 16384; i++){
+      if(frames[i] == prev->pfn){
+        prevPid = pids[i];
+        break;
+      }
+    }
+    if(currPid == prevPid){
+      // Should not allocate free page
+      kmem.freelist = r->next;
+      break;
+    } else {
+      // Should allocate free page
+      kmem.freelist = r->next->next;
+      break;
+    }
+  }
+  //FIXME
 
   if(kmem.use_lock) {
   	// V2P and shift, and mask off
     framenumber = (uint)(V2P(r) >> 12 & 0xffff);
+    pfn = framenumber;
+
+    
 
     updatePid(1);
 
     frames[index] = framenumber;
     pids[index] = pidNum;
     index++;
+
+
     release(&kmem.lock);
   }
   return (char*)r;
@@ -135,8 +160,32 @@ kalloc2(uint pid)
   if(kmem.use_lock)
     acquire(&kmem.lock);
   r = kmem.freelist;
-  if(r)
-    kmem.freelist = r->next;
+
+  if(r){
+    //FIXME
+    for(int i = 0; i < 16384; i++){
+      if (frames[i] == r->pfn) {
+        currPid = pids[i];
+        break;
+      }
+    }
+    for(int i = 0; i < 16384; i++){
+      if(frames[i] == prev->pfn){
+        prevPid = pids[i];
+        break;
+      }
+    }
+    if(currPid == prevPid){
+      // Should not allocate free page
+      kmem.freelist = r->next;
+      break;
+    } else {
+      // Should allocate free page
+      kmem.freelist = r->next->next;
+      break;
+    }
+  }
+  //FIXME
   
   // Update global pid
   updatePid(pid);
@@ -144,6 +193,7 @@ kalloc2(uint pid)
   if(kmem.use_lock) {
   	  // V2P and shift, and mask off
     framenumber = (uint)(V2P(r) >> 12 & 0xffff);
+    pfn = framenumber;
 
     frames[index] = framenumber;
     pids[index] = pidNum;
