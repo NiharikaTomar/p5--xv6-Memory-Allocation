@@ -13,16 +13,15 @@ void freerange(void *vstart, void *vend);
 extern char end[]; // first address after kernel loaded from ELF file
                    // defined by the kernel linker script in kernel.ld
 
-int frames[16385];
-int pids[16385];
+int frames[16385] = {[0 ... 16385-1] = -1};
+int pids[16385] = {[0 ... 16385-1] = -1};
 int index = 0;
 uint framenumber;
 uint pfn_kfree;
-uint currPid;
+int flag = 0;
 
 struct run {
   struct run *next;
-  uint pfn;
 };
 
 struct {
@@ -47,6 +46,7 @@ kinit1(void *vstart, void *vend)
 void
 kinit2(void *vstart, void *vend)
 {
+  flag = 1;
   freerange(vstart, vend);
   kmem.use_lock = 1;
 }
@@ -85,8 +85,8 @@ kfree(char *v)
   // int freeInd = 0;
   // for(int i =0; i < 16834; i++){
   //   if(frames[i] == pfn_kfree){
-  //     frames[i] = -1;
-  //     pids[i] = -1;
+  //     // frames[i] = -1;
+  //     // pids[i] = -1;
   //     freeInd = i;
   //     break;
   //   }
@@ -106,10 +106,6 @@ kfree(char *v)
     release(&kmem.lock);
 }
 
-void updatePid(uint pid){
-	currPid = pid;
-}
-
 // Allocate one 4096-byte page of physical memory.
 // Returns a pointer that the kernel can use.
 // Returns 0 if the memory cannot be allocated.
@@ -122,24 +118,21 @@ kalloc(void)
     acquire(&kmem.lock);
   r = kmem.freelist;
   
+  // V2P and shift, and mask off
+  framenumber = (uint)(V2P(r) >> 12 & 0xffff);
+
   if(r){
     kmem.freelist = r->next;
   }
 
   if(kmem.use_lock) {    
-    // V2P and shift, and mask off
-    framenumber = (uint)(V2P(r) >> 12 & 0xffff);
-
-    updatePid(1);
-
     frames[index] = framenumber;
-    pids[index] = currPid;
+    pids[index] = 1;
     index++;
     release(&kmem.lock);
   }
   return (char*)r;
 }
-
 
 // PID
 // Allocate one 4096-byte page of physical memory.
@@ -148,79 +141,96 @@ kalloc(void)
 char*
 kalloc2(uint pid)
 {
-  struct run *r;
-  struct run *prev; // head of the freelist
-  // uint nextPid = -1;
-  // uint prevPid = -1;
+  struct run *r; // current head of the freelist
+  struct run *prev; // previous head of the freelist
+  struct run *store_head; // stores current head of the freelist
+  uint nextPid = -1;
+  uint prevPid = -1;
 
   if(kmem.use_lock)
     acquire(&kmem.lock);
   r = kmem.freelist; // head which acts as a current pointer
 
 
-  // V2P and shift, and mask off
-  framenumber = (uint)(V2P(r) >> 12 & 0xffff);
-  r->pfn = framenumber;
+  store_head = r;
+  prev = r;
+  while(r){
+    // V2P and shift, and mask off
+    framenumber = (uint)(V2P(r) >> 12 & 0xffff);
 
-  // Update global pid
-  updatePid(pid);
-
-    prev = r;
-    while(r){
-      // V2P and shift, and mask off
-      framenumber = (uint)(V2P(r) >> 12 & 0xffff);
-      r->pfn = framenumber;
-
-
-      // looking at 1 frame before current to check for same process
-      // for(int i = 0; i < 16384; i++){
-      //   if (r == kmem.freelist) {
-      //     continue;
-      //   }
-      //   if (frames[i] == r->pfn - 1) {
-      //     prevPid = pids[i];
-      //     // cprintf("inside if: %d, %d\n", pids[i], i);
-      //     // cprintf("check prev: %d\n", prevPid);
-      //     break;
-      //   }
-      // }
-      // // looking at 1 frame after current to check for same process
-      // for(int j = 0; j < 16384; j++){
-      //   if(frames[j] == r->pfn + 1){
-      //     nextPid = pids[j];
-      //      // cprintf("check next: %d\n", nextPid);
-      //     break;
-      //   }
-      // }
-      
-    //   // cprintf("outside if: (%d, %d), (%d, %d) %d\n", pids[i], i,  pids[j], j, currPid);
-    //   if(((prevPid != -1 && prevPid ==  currPid) && (nextPid != -1 && nextPid == currPid)) ||
-    //     (prevPid == -1 && nextPid == -1) || (prevPid != -1 && currPid == prevPid && nextPid == -1) ||
-    //     (prevPid == -1 && nextPid != -1 && currPid == nextPid)){
-    //   // cprintf("inside if: (%d, %d), (%d, %d) %d\n", pids[i], i,  pids[j], j, currPid);
-        if(r == kmem.freelist){
-         kmem.freelist = r->next;
-        } else{
-           prev->next = r->next;
-        }
-        
-        // cprintf("inside if here: %p\n", prev);
+    // looking at 1 frame before current to check for same process
+    for(int i = 0; i < 16385; i++){
+      if (frames[i] == -1) {
+        prevPid = -1;
         break;
-    //   }
-       prev = r;
-       r = r->next;  
+      }
+      if (frames[i] == framenumber - 1) {
+        prevPid = pids[i];
+         // cprintf("PrevPIDINLOOP: %d %d\n", prevPid, i);
+        break;
+      }
     }
-  
+    // looking at 1 frame after current to check for same process
+    for(int j = 0; j < 16385; j++){
+      if (frames[j] == -1) {
+        nextPid = -1;
+        break;
+      }
+      if(frames[j] == framenumber + 1){
+        nextPid = pids[j];
+        break;
+      }
+    }
 
-  if(kmem.use_lock) {
+    // cprintf("R:       %p\n", r);
+    // cprintf("PrevPID: %d\n", prevPid);
+    // cprintf("CurrPID: %d\n", pid);
+    // cprintf("NextPID: %d\n", nextPid);
+    if(((prevPid == pid || prevPid == -2) && (nextPid == pid || nextPid == -2)) // if both are not free
+      || (prevPid == -1 && nextPid == -1) // if both are free
+      || ((pid == prevPid || prevPid == -2 || prevPid != -1) && (pid == -2 || pid == -1) && nextPid == -1) // if left is not free
+      || ((prevPid == -1 && (pid == nextPid || nextPid == -2)))
+      || (pid == -2)) { // if right is not free
+
+
+        // if((((prevPid == pid || prevPid == -2) && (nextPid == pid || nextPid == -2)) || pid == -2) {
+        //   cprintf("both not free\n");
+        // }
+        // if ((((prevPid == -1 ) && (nextPid == -1))) || pid == -2) {
+        //   cprintf("both free\n");
+        // }
+        // if (((pid == prevPid || prevPid == -2 || prevPid != -1) && (pid == -2 || pid == -1) && nextPid == -1)) {
+        //   cprintf("left not free\n");
+        // }
+        // if (prevPid == -1 && (pid == -2 || pid == -1) && (pid == nextPid || nextPid == -2)) {
+        //   cprintf("right not free\n");
+        // }
+
+        // if (pid == -2 || pid == 1 || pid == 2 || pid == 3) {
+
+        if(store_head){
+          kmem.freelist = r->next;
+          break;
+        } else{
+          prev->next = r->next;
+          break;
+        }
+      }
+
+      prev = r;
+      r = r->next;  
+    }
+
+  if (flag == 1){
     frames[index] = framenumber;
-    pids[index] = currPid;
+    pids[index] = pid;
     index++;
-
-
-    release(&kmem.lock);
   }
 
+  if(kmem.use_lock) {
+    release(&kmem.lock);
+  }
+  // cprintf("RRRRRRR: %p\n", r);
   return (char*)r;
 }
 
