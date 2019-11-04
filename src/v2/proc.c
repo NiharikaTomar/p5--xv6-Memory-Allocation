@@ -188,7 +188,7 @@ fork(void)
   if((np = allocproc()) == 0){
     return -1;
   }
-
+  // cprintf("pid before fork is %d\n", np->pid);
   // Copy process state from proc.
   if((np->pgdir = copyuvm(curproc->pgdir, curproc->sz, np->pid)) == 0){
     kfree(np->kstack);
@@ -199,7 +199,7 @@ fork(void)
   np->sz = curproc->sz;
   np->parent = curproc;
   *np->tf = *curproc->tf;
-
+// cprintf("pid after fork is %d\n", np->pid);
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
 
@@ -215,9 +215,9 @@ fork(void)
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;
+  // cprintf("pid in fork is %d\n", pid);
 
   release(&ptable.lock);
-
   return pid;
 }
 
