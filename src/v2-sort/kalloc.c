@@ -20,7 +20,7 @@ struct run {
     struct run *pfn; // page frame number (frames)
 };
 
-struct run frames[17000]; // global struct of frames array
+struct run frames[17000];
 
 struct {
     struct spinlock lock;
@@ -42,13 +42,14 @@ void kinit1(void *vstart, void *vend) {
 void kinit2(void *vstart, void *vend) {
     freerange(vstart, vend);
 
-    // Sort freelist ----------------------------------------------------------------CHECK IF TRUE
     struct run *p;
     p = kmem.freelist;
-    for (int i = 0; i < 17000; i++) {
-        frames[i].pid = -1;
-        frames[i].pfn = p;
+    int c = 0;
+    while (c < 17000) {
+        frames[c].pid = -1;
+        frames[c].pfn = p;
         p = p->next;
+        c++;
     }
 
     kmem.use_lock = 1;
@@ -68,14 +69,16 @@ void freerange(void *vstart, void *vend) {
 // initializing the allocator; see kinit above.)
 void kfree(char *v) {
 
-    if ((uint) v % PGSIZE || v < end || V2P(v) >= PHYSTOP)
+    if ((uint) v % PGSIZE || v < end || V2P(v) >= PHYSTOP) {
         panic("kfree");
+    }
 
     // Fill with junk to catch dangling refs.
     memset(v, 1, PGSIZE);
 
-    if (kmem.use_lock)
+    if (kmem.use_lock) {
         acquire(&kmem.lock);
+    }
     
     // Find the pid with the junk pfn and set it to -1
     for (int i = 0; i < 17000; i++) {
@@ -85,8 +88,9 @@ void kfree(char *v) {
         }
     }
 
-    if (kmem.use_lock)
+    if (kmem.use_lock) {
         release(&kmem.lock);
+    }
 }
 
 // Free the page of physical memory pointed at by v,
@@ -98,8 +102,9 @@ void kfree(char *v) {
 void kfree2(char *v) {
     struct run *r;
 
-    if ((uint) v % PGSIZE || v < end || V2P(v) >= PHYSTOP)
+    if ((uint) v % PGSIZE || v < end || V2P(v) >= PHYSTOP) {
         panic("kfree");
+    }
 
     // Fill with junk to catch dangling refs.
     memset(v, 1, PGSIZE);
@@ -213,10 +218,10 @@ kalloc2(int pid) {
 
 // System Call dump_physmem
 int
-dump_physmem(int *frs, int *pds, int numframes)
+dump_physmem(int *frs, int *pids, int numframes)
 {
     // Check if needs to return -1 
-    if(numframes <= 0 || frs == 0 || pds == 0) {
+    if(numframes <= 0 || frs == 0 || pids == 0) {
         return -1;
     }
 
@@ -224,14 +229,14 @@ dump_physmem(int *frs, int *pds, int numframes)
     int i = 0; // keep track of current index
     uint framenumber; // to store framenumber at position i
 
-    // Loop through numframes and update frs[] and pds[] 
+    // Loop through numframes and update frs[] and pids[] 
     while(c < numframes){
         // Update framenumber
         framenumber = (uint) (V2P(frames[i].pfn) >> 12);
-        // Update frs[] and pds[]
+        // Update frs[] and pids[]
         if (frames[i].pid != -1) {
             frs[c] = framenumber;
-            pds[c++] = frames[i].pid;
+            pids[c++] = frames[i].pid;
         }
         i++;
     }
