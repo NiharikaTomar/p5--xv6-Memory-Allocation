@@ -38,6 +38,7 @@ struct {
 void
 kinit1(void *vstart, void *vend)
 {
+  flag = 0;
   initlock(&kmem.lock, "kmem");
   kmem.use_lock = 0;
   freerange(vstart, vend);
@@ -50,6 +51,30 @@ kinit2(void *vstart, void *vend)
   freerange(vstart, vend);
   kmem.use_lock = 1;
 }
+void
+kfree2(char *v)
+{
+  struct run *r;
+
+  if((uint)v % PGSIZE || v < end || V2P(v) >= PHYSTOP)
+    panic("kfree");
+
+  // Fill with junk to catch dangling refs.
+  memset(v, 1, PGSIZE);
+
+  if(kmem.use_lock)
+    acquire(&kmem.lock);
+  r = (struct run*)v;
+
+  //add to free list
+  r->next = kmem.freelist;
+  kmem.freelist = r;
+
+
+
+  if(kmem.use_lock)
+    release(&kmem.lock);
+}
 
 void
 freerange(void *vstart, void *vend)
@@ -57,7 +82,7 @@ freerange(void *vstart, void *vend)
   char *p;
   p = (char*)PGROUNDUP((uint)vstart);
   for(; p + PGSIZE <= (char*)vend; p += PGSIZE)
-    kfree(p);
+    kfree2(p);
 }
 // Free the page of physical memory pointed at by v,
 // which normally should have been returned by a
@@ -78,33 +103,39 @@ kfree(char *v)
     acquire(&kmem.lock);
   r = (struct run*)v;
 
-
-  // // V2P and shift, and mask off
-  // pfn_kfree = (uint)(V2P(r) >> 12 & 0xffff);
-
-  // int freeInd = 0;
-  // for(int i =0; i < 16834; i++){
-  //   if(frames[i] == pfn_kfree){
-  //     // frames[i] = -1;
-  //     // pids[i] = -1;
-  //     freeInd = i;
-  //     break;
-  //   }
-  // }
-
-  // for(int i = freeInd; i < 16834; i++){
-  //   frames[i] = frames[i+1];
-  //   pids[i] = pids[i+1];
-  // }
-
   //add to free list
   r->next = kmem.freelist;
   kmem.freelist = r;
 
+  if(flag == 1){
+    // V2P and shift, and mask off
+    pfn_kfree = (uint)(V2P(r) >> 12 & 0xffff);
+
+    //int freeInd = 0;
+    for(int i =0; i < 16835; i++){
+      if(frames[i] == pfn_kfree){
+        frames[i] = -1;
+        pids[i] = -1;
+        //freeInd = i;
+        break;
+      }
+    }
+  }
+
+  // for(int i = freeInd; i < 16835; i++){
+  //   frames[i] = frames[i+1];
+  //   pids[i] = pids[i+1];
+  // }
+
+  // frames[16384] = -1;
+  // pids[16384] = -1;
 
   if(kmem.use_lock)
     release(&kmem.lock);
 }
+
+
+
 
 // Allocate one 4096-byte page of physical memory.
 // Returns a pointer that the kernel can use.
@@ -125,10 +156,19 @@ kalloc(void)
     kmem.freelist = r->next;
   }
 
-  if(kmem.use_lock) {    
-    frames[index] = framenumber;
-    pids[index] = 1;
-    index++;
+  if(kmem.use_lock) {
+    for(int i =0 ; i < 16385; i++){
+      if(frames[i] == -1){
+        //cprintf("kalloc1 frame_number = %x  and fames[i] = %x and index = %d\n", framenumber, frames[i], i);
+        frames[i] = framenumber;
+        pids[i] = -2;
+        break;
+      }
+    }
+    //cprintf("index in kalloc is %d \n", index);    
+    // frames[index] = framenumber;
+    // pids[index] = 1;
+    // index++;
     release(&kmem.lock);
   }
   return (char*)r;
@@ -143,94 +183,75 @@ kalloc2(uint pid)
 {
   struct run *r; // current head of the freelist
   struct run *prev; // previous head of the freelist
-  struct run *store_head; // stores current head of the freelist
+  struct run *head; // stores current head of the freelist
   uint nextPid = -1;
   uint prevPid = -1;
 
   if(kmem.use_lock)
     acquire(&kmem.lock);
   r = kmem.freelist; // head which acts as a current pointer
-
-
-  store_head = r;
-  prev = r;
+  head = kmem.freelist;
+  prev = head;
+  int skip = 1;
   while(r){
-    // V2P and shift, and mask off
+    //V2P and shift, and mask off
     framenumber = (uint)(V2P(r) >> 12 & 0xffff);
 
-    // looking at 1 frame before current to check for same process
-    for(int i = 0; i < 16385; i++){
-      if (frames[i] == -1) {
-        prevPid = -1;
-        break;
-      }
-      if (frames[i] == framenumber - 1) {
-        prevPid = pids[i];
-         // cprintf("PrevPIDINLOOP: %d %d\n", prevPid, i);
-        break;
-      }
-    }
-    // looking at 1 frame after current to check for same process
-    for(int j = 0; j < 16385; j++){
-      if (frames[j] == -1) {
-        nextPid = -1;
-        break;
-      }
-      if(frames[j] == framenumber + 1){
-        nextPid = pids[j];
-        break;
-      }
-    }
-
-    // cprintf("R:       %p\n", r);
-    // cprintf("PrevPID: %d\n", prevPid);
-    // cprintf("CurrPID: %d\n", pid);
-    // cprintf("NextPID: %d\n", nextPid);
-    if(((prevPid == pid || prevPid == -2) && (nextPid == pid || nextPid == -2)) // if both are not free
-      || (prevPid == -1 && nextPid == -1) // if both are free
-      || ((pid == prevPid || prevPid == -2 || prevPid != -1) && (pid == -2 || pid == -1) && nextPid == -1) // if left is not free
-      || ((prevPid == -1 && (pid == nextPid || nextPid == -2)))
-      || (pid == -2)) { // if right is not free
-
-
-        // if((((prevPid == pid || prevPid == -2) && (nextPid == pid || nextPid == -2)) || pid == -2) {
-        //   cprintf("both not free\n");
-        // }
-        // if ((((prevPid == -1 ) && (nextPid == -1))) || pid == -2) {
-        //   cprintf("both free\n");
-        // }
-        // if (((pid == prevPid || prevPid == -2 || prevPid != -1) && (pid == -2 || pid == -1) && nextPid == -1)) {
-        //   cprintf("left not free\n");
-        // }
-        // if (prevPid == -1 && (pid == -2 || pid == -1) && (pid == nextPid || nextPid == -2)) {
-        //   cprintf("right not free\n");
-        // }
-
-        // if (pid == -2 || pid == 1 || pid == 2 || pid == 3) {
-
-        if(store_head){
-          kmem.freelist = r->next;
+      //looking at 1 frame before current to check for same process
+      for(int i = 0; i < 16385; i++){
+        if (frames[i] == framenumber - 1) {
+          prevPid = pids[i];
+          cprintf("prevp %d", prevPid);
           break;
-        } else{
-          prev->next = r->next;
+        }
+      }
+      //looking at 1 frame after current to check for same process
+      for(int j = 0; j < 16385; j++){
+        if(frames[j] == framenumber + 1){
+          nextPid = pids[j];
+          cprintf("nextp %d", nextPid);
           break;
         }
       }
 
+    // if(pid == -2 ||
+    //   (prevPid == -1 && nextPid == -1) // if both are free
+    //       || ((pid == prevPid || prevPid == -2) && nextPid == -1) // if left is not free
+    //       || ((prevPid == -1 && (pid == nextPid || nextPid == -2)))) // if right is not free
+    //       || ((prevPid == pid || prevPid == -2) && (nextPid == pid || nextPid == -2)) // if both are not free
+    //       {
+    if(pid == -2 
+      //|| 
+      /*((prevPid == -1 || prevPid == -2 || prevPid == pid) && (nextPid == -1 || nextPid == -2 || nextPid == pid))*/ ){
+
+        if (skip){
+          kmem.freelist = r->next;
+        }
+        else{
+          prev->next = r->next;
+        }
+
+      //if(flag == 1){    
+        for(int i = 0 ; i < 16385; i++){
+          if(frames[i] == -1){
+            frames[i] = framenumber;
+            pids[i] = pid;
+           // cprintf("kalloc2 frame_number = %x  and pid = %d \n", framenumber, pid);
+            break;
+          }
+        }
+      //}
+      
+      break;
+      }
+      skip = 0;
       prev = r;
       r = r->next;  
     }
 
-  if (flag == 1){
-    frames[index] = framenumber;
-    pids[index] = pid;
-    index++;
-  }
-
   if(kmem.use_lock) {
     release(&kmem.lock);
   }
-  // cprintf("RRRRRRR: %p\n", r);
   return (char*)r;
 }
 
@@ -239,9 +260,19 @@ dump_physmem(int *frs, int *pds, int numframes)
 {
   if(numframes <= 0 || frs == 0 || pds == 0)
     return -1;
-  for (int i = 0; i < numframes; i++) {
-    frs[i] = frames[i];
-    pds[i] = pids[i];
+  int c = 0;
+  int oldMax = 100000;
+  while(c < numframes){
+    int curr_max = 0; 
+    for(int i = 0; i < 16385; i++){
+      if(frames[i] != -1 && frames[i] > curr_max && frames[i] < oldMax){
+        frs[c] = frames[i];
+        pds[c] = pids[i];
+        curr_max = frames[i];
+      }
+    }
+    c++;
+    oldMax = curr_max;
   }
   return 0;
 }

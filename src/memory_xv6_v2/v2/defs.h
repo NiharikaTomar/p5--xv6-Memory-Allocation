@@ -64,7 +64,7 @@ extern uchar    ioapicid;
 void            ioapicinit(void);
 
 // kalloc.c
-char*           kalloc(void);
+// char*           kalloc(void);
 char*           kalloc2(uint);
 void            kfree(char*);
 void            kinit1(void*, void*);
@@ -176,7 +176,7 @@ void            seginit(void);
 void            kvmalloc(void);
 pde_t*          setupkvm(void);
 char*           uva2ka(pde_t*, char*);
-int             allocuvm(pde_t*, uint, uint);
+int             allocuvm(pde_t*, uint, uint, uint);
 int             deallocuvm(pde_t*, uint, uint);
 void            freevm(pde_t*);
 void            inituvm(pde_t*, char*, uint);
