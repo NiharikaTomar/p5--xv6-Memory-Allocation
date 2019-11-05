@@ -28,28 +28,6 @@ struct {
     struct run *freelist;
 } kmem;
 
-
-static struct run *
-security_check(int pid) {
-    if (frames[0].pid == 0 && (frames[1].pid == 0 || frames[1].pid == pid)) {
-        frames[0].pid = pid;
-        return frames[0].pfn;
-    }
-    for (int i = 1; i < 17000; i++) {
-        if (pid == -2 && !frames[i].pid) {
-            frames[i].pid = pid;
-            return frames[i].pfn;
-        }
-        else if ((frames[i - 1].pid == pid || frames[i - 1].pid == 0 || frames[i - 1].pid == -2)
-            && (frames[i + 1].pid == pid || frames[i + 1].pid == 0 || frames[i + 1].pid == -2)
-            && !frames[i].pid) {
-            frames[i].pid = pid;
-            return frames[i].pfn;
-        }
-    }
-    return 0;
-}
-
 // Initialization happens in two phases.
 // 1. main() calls kinit1() while still using entrypgdir to place just
 // the pages mapped by entrypgdir on free list.
@@ -64,10 +42,11 @@ void kinit1(void *vstart, void *vend) {
 void kinit2(void *vstart, void *vend) {
     freerange(vstart, vend);
 
+    // Sort freelist ----------------------------------------------------------------CHECK IF TRUE
     struct run *p;
     p = kmem.freelist;
     for (int i = 0; i < 17000; i++) {
-        frames[i].pid = 0;
+        frames[i].pid = -1;
         frames[i].pfn = p;
         p = p->next;
     }
@@ -98,10 +77,10 @@ void kfree(char *v) {
     if (kmem.use_lock)
         acquire(&kmem.lock);
     
-    // Putting element back to freelist and removing from frames array
+    // Find the pid with the junk pfn and set it to -1
     for (int i = 0; i < 17000; i++) {
         if (frames[i].pfn == (struct run *) v) {
-            frames[i].pid = 0;
+            frames[i].pid = -1;
             break;
         }
     }
@@ -150,15 +129,30 @@ kalloc(void) {
         acquire(&kmem.lock);
     }
 
-    if (!kmem.use_lock){
+    r = kmem.freelist;
 
-        r = kmem.freelist;
+    if (!kmem.use_lock){
         if (r) {
             kmem.freelist = r->next;
         }
-
     } else {
-        r = security_check(-2); /// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        // SECURITY CHECKS
+        int c = 0;
+        while (c < 17000) {
+            // current frame is not allocated or unknown
+            if ((frames[c].pid == -1) ||
+            // OR left is not allocated or unknown
+            ((frames[c-1].pid == -2 || frames[c-1].pid == -1) &&
+            // AND right is not allocated or unknown
+            (frames[c+1].pid == -2 || frames[c+1].pid == -1) &&
+            // AND current frame is not allocated
+            frames[c].pid == -1)) {
+                frames[c].pid = -2;
+                r = frames[c].pfn;
+                break;
+            }
+            c++;
+        }
     }
 
     if (kmem.use_lock) {
@@ -176,15 +170,39 @@ kalloc2(int pid) {
         acquire(&kmem.lock);
     }
 
-    if (!kmem.use_lock){
+    r = kmem.freelist;
 
-        r = kmem.freelist;
+    if (!kmem.use_lock){
         if (r) {
             kmem.freelist = r->next;
         }
-
     } else {
-        r = security_check(pid); /// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        // SECURITY CHECKS
+        int c = 0;
+        while (c < 17000) {
+            // first frame
+            if (c == 0) {
+                // both frames (current and right) not allocated
+                if (frames[c].pid == -1 && frames[c+1].pid == -1) {
+                    frames[c].pid = pid;
+                    r = frames[c].pfn;
+                    break;
+                }
+            }
+            // current pid is not allocated and pid is -2
+            if ((frames[c].pid == -1 && pid == -2) ||
+            // OR left is the same or left is not allocated or unknown
+            ((frames[c-1].pid == pid || frames[c-1].pid == -1 || frames[c-1].pid == -2) &&
+            // AND right is the same or not allocated or unknown
+            (frames[c+1].pid == pid || frames[c+1].pid == -1 || frames[c+1].pid == -2) &&
+            // AND current frame is not allocated
+            frames[c].pid == -1)) {
+                frames[c].pid = pid;
+                r = frames[c].pfn;
+                break;
+            }
+            c++;
+        }
     }
 
     if (kmem.use_lock) {
@@ -211,11 +229,12 @@ dump_physmem(int *frs, int *pds, int numframes)
         // Update framenumber
         framenumber = (uint) (V2P(frames[i].pfn) >> 12);
         // Update frs[] and pds[]
-        if (frames[i].pid != 0) {
+        if (frames[i].pid != -1) {
             frs[c] = framenumber;
             pds[c++] = frames[i].pid;
         }
         i++;
     }
+
   return 0;
 }
